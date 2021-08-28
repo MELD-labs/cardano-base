@@ -16,7 +16,6 @@
 -- | Abstract hashing functionality.
 module Cardano.Crypto.Hash.Class
   ( HashAlgorithm (..)
-  , CanUnpack
   , sizeHash
   , ByteString
   , Hash(UnsafeHash)
@@ -90,7 +89,7 @@ import           Cardano.Binary
                    (Encoding, FromCBOR (..), ToCBOR (..), Size, decodeBytes,
                     serializeEncoding')
 
-class (KnownNat (SizeHash h), CanUnpack (SizeHash h), Typeable h) => HashAlgorithm h where
+class (KnownNat (SizeHash h), Typeable h) => HashAlgorithm h where
   --TODO: eliminate this Typeable constraint needed only for the ToCBOR
   -- the ToCBOR should not need it either
 
@@ -113,11 +112,8 @@ deriving via OnlyCheckWhnfNamed "Hash" (Hash h a) instance NoThunks (Hash h a)
 instance NFData (Hash h a) where
   rnf = rwhnf
 
-instance KnownNat (SizeHash h) => Eq (Hash h a) where
-  UnsafeHashRep x1 == UnsafeHashRep x2 = applyOrdPackedBytes (==) x1 x2
-
-instance KnownNat (SizeHash h) => Ord (Hash h a) where
-  UnsafeHashRep x1 <= UnsafeHashRep x2 = applyOrdPackedBytes (<=) x1 x2
+deriving instance Eq (Hash h a)
+deriving instance Ord (Hash h a)
 
 pattern UnsafeHash :: forall h a. KnownNat (SizeHash h) => ShortByteString -> Hash h a
 pattern UnsafeHash bytes <- UnsafeHashRep (unpackBytes -> bytes)

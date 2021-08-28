@@ -1,29 +1,19 @@
+{-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE DerivingVia #-}
+{-# LANGUAGE GADTs #-}
 {-# LANGUAGE MagicHash #-}
-{-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE StandaloneDeriving #-}
-{-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE TypeFamilyDependencies #-}
-{-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE UnboxedTuples #-}
-{-# LANGUAGE UndecidableInstances #-}
 
-module Cardano.Crypto.PackedBytes
-  ( PackedBytes
-  , CanUnpack
-  , packBytes
-  , unpackBytes
-  , applyOrdPackedBytes
-  ) where
+module Cardano.Crypto.PackedBytes (PackedBytes(..), packBytes, unpackBytes) where
 
 import Control.DeepSeq
-import Control.Monad
 import Data.ByteString.Short
 import Data.ByteString.Short.Internal
-import Data.Maybe
 import Data.Primitive.ByteArray
 import Data.Typeable
 import Data.Word
@@ -32,19 +22,51 @@ import GHC.ST
 import GHC.TypeLits
 import NoThunks.Class
 
+data PackedBytes (n :: Nat) where
+  PackedBytes28# :: Word16#
+                 -> Word16#
+                 -> Word16#
+                 -> Word16#
+                 -> Word16#
+                 -> Word16#
+                 -> Word16#
+                 -> Word16#
+                 -> Word16#
+                 -> Word16#
+                 -> Word16#
+                 -> Word16#
+                 -> Word16#
+                 -> Word16#
+                 -> PackedBytes 28
+  PackedBytes32 :: {-# UNPACK #-} !Word64
+                -> {-# UNPACK #-} !Word64
+                -> {-# UNPACK #-} !Word64
+                -> {-# UNPACK #-} !Word64
+                -> PackedBytes 32
+  PackedBytes# :: ByteArray# -> PackedBytes n
 
-data PackedBytes28 = PackedBytes28# Word16# Word16# Word16# Word16#
-                                    Word16# Word16# Word16# Word16#
-                                    Word16# Word16# Word16# Word16#
-                                    Word16# Word16#
-  deriving (Eq, Ord)
-deriving via OnlyCheckWhnfNamed "PackedBytes28" PackedBytes28 instance NoThunks PackedBytes28
+deriving via OnlyCheckWhnfNamed "PackedBytes" (PackedBytes n) instance NoThunks (PackedBytes n)
 
-instance NFData PackedBytes28 where
-  rnf PackedBytes28# {}  = ()
+instance Eq (PackedBytes n) where
+  x1@PackedBytes28# {} == x2 = comparePackedBytes28With eqWord16# x1 x2
+  PackedBytes32 x0 x1 x2 x3 == PackedBytes32 y0 y1 y2 y3 =
+    x0 == y0 && x1 == y1 && x2 == y2 && x3 == y3
+  x1 == x2 = unpackBytes x1 == unpackBytes x2
 
-unpackBytes28 :: PackedBytes28 -> ShortByteString
-unpackBytes28 (PackedBytes28# w00# w01# w02# w03# w04# w05# w06# w07# w08# w09# w10# w11# w12# w13#) =
+instance Ord (PackedBytes n) where
+  x1@PackedBytes28# {} <= x2 = comparePackedBytes28With leWord16# x1 x2
+  PackedBytes32 x0 x1 x2 x3 <= PackedBytes32 y0 y1 y2 y3 =
+    x0 <= y0 && x1 <= y1 && x2 <= y2 && x3 <= y3
+  x1 <= x2 = unpackBytes x1 <= unpackBytes x2
+
+instance NFData (PackedBytes n) where
+  rnf PackedBytes28# {} = ()
+  rnf PackedBytes32 {}  = ()
+  rnf PackedBytes# {}   = ()
+
+
+unpackBytes :: PackedBytes n -> ShortByteString
+unpackBytes (PackedBytes28# w00# w01# w02# w03# w04# w05# w06# w07# w08# w09# w10# w11# w12# w13#) =
   runST $ ST $ \s0# ->
     case newByteArray# 28# s0# of
       (# s1#, mba# #) ->
@@ -64,10 +86,21 @@ unpackBytes28 (PackedBytes28# w00# w01# w02# w03# w04# w05# w06# w07# w08# w09# 
                               (writeWord16Array# mba#  0# (extendWord16# w00#) s1#)))))))))))))
         in case unsafeFreezeByteArray# mba# s2# of
           (# s3#, ba# #) -> (# s3#, SBS ba# #)
-{-# INLINE unpackBytes28 #-}
+unpackBytes (PackedBytes32 w0 w1 w2 w3) =
+  runST $ do
+    mba <- newByteArray 32
+    writeByteArray mba 0 w0
+    writeByteArray mba 1 w1
+    writeByteArray mba 2 w2
+    writeByteArray mba 3 w3
+    ByteArray ba# <- unsafeFreezeByteArray mba
+    pure $ SBS ba#
+unpackBytes (PackedBytes# ba#) = SBS ba#
+{-# INLINE unpackBytes #-}
 
 
-packBytes28 :: ShortByteString -> PackedBytes28
+
+packBytes28 :: ShortByteString -> PackedBytes 28
 packBytes28 (SBS ba#) =
   PackedBytes28#
     (narrowWord16# (indexWord16Array# ba# 0#))
@@ -87,32 +120,7 @@ packBytes28 (SBS ba#) =
 {-# INLINE packBytes28 #-}
 
 
-data PackedBytes32 =
-  PackedBytes32
-    {-# UNPACK #-} !Word64
-    {-# UNPACK #-} !Word64
-    {-# UNPACK #-} !Word64
-    {-# UNPACK #-} !Word64
-  deriving (Eq, Ord)
-deriving via OnlyCheckWhnfNamed "PackedBytes32" PackedBytes32 instance NoThunks PackedBytes32
-
-instance NFData PackedBytes32 where
-  rnf PackedBytes32 {}  = ()
-
-
-unpackBytes32 :: PackedBytes32 -> ShortByteString
-unpackBytes32 (PackedBytes32 w0 w1 w2 w3) =
-  runST $ do
-    mba <- newByteArray 32
-    writeByteArray mba 0 w0
-    writeByteArray mba 1 w1
-    writeByteArray mba 2 w2
-    writeByteArray mba 3 w3
-    ByteArray ba# <- unsafeFreezeByteArray mba
-    pure $ SBS ba#
-{-# INLINE unpackBytes32 #-}
-
-packBytes32 :: ShortByteString -> PackedBytes32
+packBytes32 :: ShortByteString -> PackedBytes 32
 packBytes32 (SBS ba#) =
   let ba = ByteArray ba#
   in PackedBytes32
@@ -123,145 +131,47 @@ packBytes32 (SBS ba#) =
 {-# INLINE packBytes32 #-}
 
 
-newtype UnpackedBytes (n :: Nat) = UnpackedBytes { getUnpackedBytes :: ShortByteString }
-  deriving (Eq, Ord)
-
-type family PackedBytes (n :: Nat) = pb | pb -> n where
-  PackedBytes 28 = PackedBytes28
-  PackedBytes 32 = PackedBytes32
-  PackedBytes n  = UnpackedBytes n
-
-type family CanUnpack (n :: Nat) :: Constraint where
-  CanUnpack n = CanUnpackError n (CmpNat n 32)
-
-
-type family CanUnpackError (n :: Nat) (c :: Ordering) :: Constraint where
-  CanUnpackError n 'LT = ()
-  CanUnpackError n 'EQ = ()
-  CanUnpackError n 'GT = TypeError ('Text "Unpackable number of bytes: " ':<>: 'ShowType n)
-
-packBytesN ::
-     forall n m. (KnownNat n, KnownNat m)
-  => Proxy n
-  -> (ShortByteString -> PackedBytes m)
-  -> ShortByteString
-  -> Maybe (PackedBytes n)
-packBytesN px p sbs =
-  case sameNat px (Proxy :: Proxy m) of
-    Just Refl -> Just $ p sbs
-    Nothing   -> Nothing
 
 packBytes :: forall n . KnownNat n => ShortByteString -> PackedBytes n
-packBytes sbs =
+packBytes sbs@(SBS ba#) =
   let px = Proxy :: Proxy n
-   in fromMaybe (error "Unpackable bytes") $
-      msum [ packBytesN px (UnpackedBytes @0) sbs
-           , packBytesN px (UnpackedBytes @1) sbs
-           , packBytesN px (UnpackedBytes @2) sbs
-           , packBytesN px (UnpackedBytes @3) sbs
-           , packBytesN px (UnpackedBytes @4) sbs
-           , packBytesN px (UnpackedBytes @5) sbs
-           , packBytesN px (UnpackedBytes @6) sbs
-           , packBytesN px (UnpackedBytes @7) sbs
-           , packBytesN px (UnpackedBytes @8) sbs
-           , packBytesN px (UnpackedBytes @9) sbs
-           , packBytesN px (UnpackedBytes @10) sbs
-           , packBytesN px (UnpackedBytes @11) sbs
-           , packBytesN px (UnpackedBytes @12) sbs
-           , packBytesN px (UnpackedBytes @13) sbs
-           , packBytesN px (UnpackedBytes @14) sbs
-           , packBytesN px (UnpackedBytes @15) sbs
-           , packBytesN px (UnpackedBytes @16) sbs
-           , packBytesN px (UnpackedBytes @17) sbs
-           , packBytesN px (UnpackedBytes @18) sbs
-           , packBytesN px (UnpackedBytes @19) sbs
-           , packBytesN px (UnpackedBytes @20) sbs
-           , packBytesN px (UnpackedBytes @21) sbs
-           , packBytesN px (UnpackedBytes @22) sbs
-           , packBytesN px (UnpackedBytes @23) sbs
-           , packBytesN px (UnpackedBytes @24) sbs
-           , packBytesN px (UnpackedBytes @25) sbs
-           , packBytesN px (UnpackedBytes @26) sbs
-           , packBytesN px (UnpackedBytes @27) sbs
-           , packBytesN px packBytes28 sbs
-           , packBytesN px (UnpackedBytes @29) sbs
-           , packBytesN px (UnpackedBytes @30) sbs
-           , packBytesN px (UnpackedBytes @31) sbs
-           , packBytesN px packBytes32 sbs
-           ]
+   in case sameNat px (Proxy :: Proxy 28) of
+        Just Refl -> packBytes28 sbs
+        Nothing -> case sameNat px (Proxy :: Proxy 32) of
+          Just Refl -> packBytes32 sbs
+          Nothing   -> PackedBytes# ba#
 {-# INLINE[1] packBytes #-}
 
-unpackBytesN ::
-     forall n m. (KnownNat n, KnownNat m)
-  => Proxy n
-  -> (PackedBytes m -> ShortByteString)
-  -> PackedBytes n
-  -> Maybe ShortByteString
-unpackBytesN px p sbs =
-  case sameNat px (Proxy :: Proxy m) of
-    Just Refl -> Just $ p sbs
-    Nothing   -> Nothing
-
-
-unpackBytes :: forall n . KnownNat n => PackedBytes n -> ShortByteString
-unpackBytes pb =
-  let px = Proxy :: Proxy n
-   in fromMaybe (error "Unpackable bytes") $
-      msum [ unpackBytesN px (getUnpackedBytes @0) pb
-           , unpackBytesN px (getUnpackedBytes @1) pb
-           , unpackBytesN px (getUnpackedBytes @2) pb
-           , unpackBytesN px (getUnpackedBytes @3) pb
-           , unpackBytesN px (getUnpackedBytes @4) pb
-           , unpackBytesN px (getUnpackedBytes @5) pb
-           , unpackBytesN px (getUnpackedBytes @6) pb
-           , unpackBytesN px (getUnpackedBytes @7) pb
-           , unpackBytesN px (getUnpackedBytes @8) pb
-           , unpackBytesN px (getUnpackedBytes @9) pb
-           , unpackBytesN px (getUnpackedBytes @10) pb
-           , unpackBytesN px (getUnpackedBytes @11) pb
-           , unpackBytesN px (getUnpackedBytes @12) pb
-           , unpackBytesN px (getUnpackedBytes @13) pb
-           , unpackBytesN px (getUnpackedBytes @14) pb
-           , unpackBytesN px (getUnpackedBytes @15) pb
-           , unpackBytesN px (getUnpackedBytes @16) pb
-           , unpackBytesN px (getUnpackedBytes @17) pb
-           , unpackBytesN px (getUnpackedBytes @18) pb
-           , unpackBytesN px (getUnpackedBytes @19) pb
-           , unpackBytesN px (getUnpackedBytes @20) pb
-           , unpackBytesN px (getUnpackedBytes @21) pb
-           , unpackBytesN px (getUnpackedBytes @22) pb
-           , unpackBytesN px (getUnpackedBytes @23) pb
-           , unpackBytesN px (getUnpackedBytes @24) pb
-           , unpackBytesN px (getUnpackedBytes @25) pb
-           , unpackBytesN px (getUnpackedBytes @26) pb
-           , unpackBytesN px (getUnpackedBytes @27) pb
-           , unpackBytesN px unpackBytes28 pb
-           , unpackBytesN px (getUnpackedBytes @29) pb
-           , unpackBytesN px (getUnpackedBytes @30) pb
-           , unpackBytesN px (getUnpackedBytes @31) pb
-           , unpackBytesN px unpackBytes32 pb
-           ]
-{-# INLINE[1] unpackBytes #-}
+packBytesN :: ShortByteString -> PackedBytes n
+packBytesN (SBS ba#) = PackedBytes# ba#
+{-# INLINE packBytesN #-}
 
 {-# RULES
 "packBytes28" packBytes = packBytes28
 "packBytes32" packBytes = packBytes32
-"unpackBytes28" unpackBytes = unpackBytes28
-"unpackBytes32" unpackBytes = unpackBytes32
+"packBytesN" packBytes = packBytesN
   #-}
 
 
-applyOrdPackedBytes ::
-     forall n b. KnownNat n
-  => (forall a. Ord a => a -> a -> b)
-  -> PackedBytes n
-  -> PackedBytes n
-  -> b
-applyOrdPackedBytes f x1 x2 =
-  let px = Proxy :: Proxy n
-   in case sameNat px (Proxy :: Proxy 28) of
-        Just Refl -> f x1 x2
-        Nothing -> case sameNat px (Proxy :: Proxy 32) of
-          Just Refl -> f x1 x2
-          Nothing   -> f (unpackBytes x1) (unpackBytes x2)
-{-# INLINE applyOrdPackedBytes #-}
+
+
+comparePackedBytes28With :: (Word16# -> Word16# -> Int#) -> PackedBytes 28 -> PackedBytes 28 -> Bool
+comparePackedBytes28With f x y =
+  let !(PackedBytes28# x00# x01# x02# x03# x04# x05# x06# x07# x08# x09# x10# x11# x12# x13#) = x
+      !(PackedBytes28# y00# y01# y02# y03# y04# y05# y06# y07# y08# y09# y10# y11# y12# y13#) = y
+  in isTrue# (f x00# y00#) &&
+     isTrue# (f x01# y01#) &&
+     isTrue# (f x02# y02#) &&
+     isTrue# (f x03# y03#) &&
+     isTrue# (f x04# y04#) &&
+     isTrue# (f x05# y05#) &&
+     isTrue# (f x06# y06#) &&
+     isTrue# (f x07# y07#) &&
+     isTrue# (f x08# y08#) &&
+     isTrue# (f x09# y09#) &&
+     isTrue# (f x10# y10#) &&
+     isTrue# (f x11# y11#) &&
+     isTrue# (f x12# y12#) &&
+     isTrue# (f x13# y13#)
+{-# INLINE comparePackedBytes28With #-}
+

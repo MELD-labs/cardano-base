@@ -309,7 +309,7 @@ mungeName basename
 --
 
 deriving instance HashAlgorithm h => Show (VerKeyKES (SumKES h d))
-deriving instance HashAlgorithm h => Eq   (VerKeyKES (SumKES h d))
+deriving instance Eq   (VerKeyKES (SumKES h d))
 
 instance (HashAlgorithm h, KESAlgorithm d) => NoThunks (SignKeyKES (SumKES h d))
 
